@@ -5,10 +5,24 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     """
     Skema request dari pengguna untuk mengirim pesan ke chatbot.
+    Dilengkapi batas karakter dan validasi format regex untuk mencegah serangan payload bloat & kesalahan ID.
     """
-    message: str = Field(..., min_length=1, description="Pesan atau pertanyaan dari pengguna")
-    thread_id: Optional[str] = Field(None, description="ID Thread OpenAI jika melanjutkan percakapan sebelumnya. Kosongkan untuk percakapan baru.")
-    assistant_id: Optional[str] = Field(None, description="Override Assistant ID (opsional jika menggunakan multiple assistants)")
+    message: str = Field(
+        ..., 
+        min_length=1, 
+        max_length=4000, 
+        description="Pesan atau pertanyaan dari pengguna (maksimal 4000 karakter)"
+    )
+    thread_id: Optional[str] = Field(
+        None, 
+        pattern=r"^thread_[a-zA-Z0-9]+$", 
+        description="ID Thread OpenAI yang valid (diawali 'thread_'). Kosongkan untuk percakapan baru."
+    )
+    assistant_id: Optional[str] = Field(
+        None, 
+        pattern=r"^asst_[a-zA-Z0-9]+$", 
+        description="Override Assistant ID (diawali 'asst_')"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -56,4 +70,4 @@ class HealthResponse(BaseModel):
     status: str = Field("ok", description="Status servis")
     app_name: str = Field(..., description="Nama aplikasi")
     environment: str = Field(..., description="Lingkungan aktif (development/production)")
-    version: str = Field("1.0.0", description="Versi API")
+    version: str = Field("1.0.1", description="Versi API")
