@@ -18,10 +18,13 @@ class Settings(BaseSettings):
     allowed_origins_raw: str = Field("http://localhost:3000,http://localhost:8000,http://127.0.0.1:8000", alias="ALLOWED_ORIGINS")
     internal_api_key: Optional[str] = Field(None, alias="INTERNAL_API_KEY")
     
-    # OpenAI Credentials
+    # OpenAI Credentials & Responses API
     openai_api_key: str = Field("sk-your-openai-api-key-here", alias="OPENAI_API_KEY")
-    openai_assistant_id: str = Field("asst_your_assistant_id_here", alias="OPENAI_ASSISTANT_ID")
     openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
+    openai_system_instructions: str = Field(
+        "Kamu adalah asisten AI yang ramah dan sangat membantu.", 
+        alias="OPENAI_SYSTEM_INSTRUCTIONS"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

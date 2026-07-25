@@ -1,11 +1,12 @@
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ChatRequest(BaseModel):
     """
     Skema request dari pengguna untuk mengirim pesan ke chatbot.
-    Dilengkapi batas karakter dan validasi format regex untuk mencegah serangan payload bloat & kesalahan ID.
+    Sudah dimigrasikan ke OpenAI Responses API, namun tetap mendukung field 'thread_id' (legacy) 
+    agar kompatibel dengan frontend yang belum diperbarui.
     """
     message: str = Field(
         ..., 
@@ -13,22 +14,35 @@ class ChatRequest(BaseModel):
         max_length=4000, 
         description="Pesan atau pertanyaan dari pengguna (maksimal 4000 karakter)"
     )
+    previous_response_id: Optional[str] = Field(
+        None, 
+        description="ID dari respons OpenAI sebelumnya (response.id) untuk melanjutkan percakapan secara stateful. Kosongkan untuk mulai percakapan baru."
+    )
     thread_id: Optional[str] = Field(
         None, 
-        pattern=r"^thread_[a-zA-Z0-9]+$", 
-        description="ID Thread OpenAI yang valid (diawali 'thread_'). Kosongkan untuk percakapan baru."
+        description="[Deprecated] Field lama untuk kompatibilitas mundur dengan arsitektur Assistants API. Akan otomatis dipetakan ke previous_response_id jika diisi."
     )
-    assistant_id: Optional[str] = Field(
+    instructions: Optional[str] = Field(
         None, 
-        pattern=r"^asst_[a-zA-Z0-9]+$", 
-        description="Override Assistant ID (diawali 'asst_')"
+        description="Override instruksi sistem (system prompt) untuk sesi percakapan ini."
     )
+
+    @model_validator(mode="after")
+    def map_legacy_fields(self) -> "ChatRequest":
+        """
+        Jika frontend masih mengirimkan 'thread_id' (karena migration in-progress) dan belum 
+        mengirimkan 'previous_response_id', petakan nilainya secara otomatis.
+        """
+        if self.thread_id and not self.previous_response_id:
+            # Petakan thread_id lama sebagai previous_response_id
+            self.previous_response_id = self.thread_id
+        return self
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "message": "Halo, apa yang bisa kamu bantu hari ini?",
-                "thread_id": "thread_abc123"
+                "message": "Halo, bisakah kamu jelaskan apa itu hukum termodinamika?",
+                "previous_response_id": "resp_abc123xyz"
             }
         }
     }
@@ -36,31 +50,36 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """
-    Skema balasan dari chatbot (OpenAI Assistant).
+    Skema balasan dari chatbot menggunakan arsitektur modern OpenAI Responses API.
     """
-    response: str = Field(..., description="Jawaban teks dari AI Assistant")
-    thread_id: str = Field(..., description="ID Thread percakapan aktif")
-    run_id: str = Field(..., description="ID eksekusi run pada OpenAI")
-    status: str = Field(..., description="Status akhir dari eksekusi run (e.g. 'completed')")
+    response: str = Field(..., description="Jawaban teks dari AI")
+    response_id: str = Field(..., description="ID dari respons saat ini (resp_...). Gunakan ID ini sebagai 'previous_response_id' pada request berikutnya untuk melanjutkan obrolan.")
+    conversation_id: str = Field(..., description="Alias untuk response_id (mempermudah tracking sesi di frontend)")
+    status: str = Field("completed", description="Status eksekusi")
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "response": "Halo! Saya adalah asisten AI Anda. Ada yang bisa saya bantu?",
-                "thread_id": "thread_abc123",
-                "run_id": "run_xyz789",
+                "response": "Tentu! Hukum termodinamika pertama menyatakan bahwa energi tidak dapat diciptakan atau dimusnahkan...",
+                "response_id": "resp_abc123xyz",
+                "conversation_id": "resp_abc123xyz",
                 "status": "completed"
             }
         }
     }
 
 
-class ThreadCreateResponse(BaseModel):
+class ConversationInitResponse(BaseModel):
     """
-    Skema respons untuk pembuatan thread baru secara manual.
+    Skema respons untuk inisialisasi sesi percakapan baru.
+    Menggantikan skema ThreadCreateResponse pada arsitektur lama.
     """
-    thread_id: str = Field(..., description="ID Thread yang baru saja dibuat di OpenAI")
-    message: str = Field("Thread berhasil dibuat", description="Pesan status")
+    conversation_id: str = Field(..., description="ID sesi percakapan / respons yang diinisialisasi")
+    message: str = Field("Sesi percakapan baru berhasil diinisialisasi", description="Pesan status")
+
+
+# Alias untuk backward compatibility dengan rute lama (/api/v1/threads)
+ThreadCreateResponse = ConversationInitResponse
 
 
 class HealthResponse(BaseModel):
@@ -70,4 +89,4 @@ class HealthResponse(BaseModel):
     status: str = Field("ok", description="Status servis")
     app_name: str = Field(..., description="Nama aplikasi")
     environment: str = Field(..., description="Lingkungan aktif (development/production)")
-    version: str = Field("1.0.1", description="Versi API")
+    version: str = Field("2.0.0-responses-api", description="Versi API")
