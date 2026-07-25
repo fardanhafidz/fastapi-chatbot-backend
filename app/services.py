@@ -8,102 +8,96 @@ logger = logging.getLogger("api.services")
 
 class OpenAIService:
     """
-    Layanan untuk berkomunikasi dengan OpenAI Assistants API (v2) secara asinkron.
+    Layanan untuk berkomunikasi dengan OpenAI Responses API secara asinkron.
+    Arsitektur baru ini jauh lebih bersih, tanpa perlu mekanisme polling thread/run yang rumit.
+    Konteks percakapan otomatis dijaga oleh server OpenAI melalui parameter 'previous_response_id'.
     """
     def __init__(self, client: Optional[AsyncOpenAI] = None):
-        # Inisialisasi client secara dinamis untuk menghindari issue 'Event loop is closed' saat runtime/multiprocess
+        # Inisialisasi client secara dinamis untuk menghindari issue 'Event loop is closed'
         self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
-        self.default_assistant_id = settings.openai_assistant_id
 
-    async def create_thread(self) -> str:
+    async def init_conversation(self) -> str:
         """
-        Membuat Thread percakapan baru di server OpenAI.
+        Menginisialisasi sesi percakapan kosong baru (opsional, jika frontend ingin mendapatkan ID sesi awal).
         
         Returns:
-            str: thread_id
+            str: ID sesi / conversation ID
         """
         try:
-            thread = await self.client.beta.threads.create()
-            logger.info(f"Berhasil membuat thread baru: {thread.id}")
-            return thread.id
+            # Membuat pesan penyambutan atau inisialisasi respons awal dengan sistem instruksi
+            response = await self.client.responses.create(
+                model=settings.openai_model,
+                input="Sesi percakapan baru dimulai.",
+                instructions=settings.openai_system_instructions
+            )
+            logger.info(f"Berhasil menginisialisasi sesi percakapan baru dengan ID: {response.id}")
+            return response.id
         except AuthenticationError as e:
             logger.error("Autentikasi OpenAI gagal. Periksa OPENAI_API_KEY.")
             raise e
         except Exception as e:
-            logger.error(f"Error saat membuat thread OpenAI: {str(e)}")
+            logger.error(f"Error saat menginisialisasi percakapan OpenAI: {str(e)}")
             raise e
 
-    async def chat_with_assistant(
+    async def chat_with_responses_api(
         self, 
         message: str, 
-        thread_id: Optional[str] = None, 
-        assistant_id: Optional[str] = None
-    ) -> Tuple[str, str, str, str]:
+        previous_response_id: Optional[str] = None,
+        instructions: Optional[str] = None
+    ) -> Tuple[str, str, str]:
         """
-        Mengirim pesan ke OpenAI Assistant, menjalankan run, dan mengambil balasan terbaru.
+        Mengirim pesan ke OpenAI menggunakan arsitektur modern Responses API (client.responses.create).
 
         Args:
             message (str): Teks input dari user.
-            thread_id (Optional[str]): ID thread aktif. Jika None, akan dibuatkan thread baru.
-            assistant_id (Optional[str]): Override ID Assistant. Jika None, pakai dari settings.
+            previous_response_id (Optional[str]): ID dari response sebelumnya (resp_...) untuk menjaga konteks obrolan.
+            instructions (Optional[str]): Override system prompt/instruksi.
 
         Returns:
-            Tuple[str, str, str, str]: (response_text, thread_id, run_id, status)
+            Tuple[str, str, str]: (response_text, response_id, status)
         """
-        # 1. Tentukan Assistant ID
-        target_assistant_id = assistant_id or self.default_assistant_id
-        if not target_assistant_id or target_assistant_id == "asst_your_assistant_id_here":
-            raise ValueError("OPENAI_ASSISTANT_ID belum dikonfigurasi dengan benar di file .env atau request.")
+        # Siapkan parameter panggilan Responses API
+        params = {
+            "model": settings.openai_model,
+            "input": message,
+        }
 
-        # 2. Buat Thread jika belum ada
-        if not thread_id:
-            thread_id = await self.create_thread()
+        # Jika ada previous_response_id (dari sesi percakapan sebelumnya), sertakan agar memori obrolan bersambung
+        if previous_response_id and previous_response_id.strip():
+            # Hindari pengiriman ID lama yang keliru berformat 'thread_' jika frontend masih memakai id lama
+            if not previous_response_id.startswith("thread_"):
+                params["previous_response_id"] = previous_response_id.strip()
+
+        # Gunakan instruksi sistem dari parameter atau fallback ke konfigurasi .env
+        target_instructions = instructions or settings.openai_system_instructions
+        if target_instructions and target_instructions.strip():
+            # Instruksi biasanya diset pada percakapan atau setiap turn
+            params["instructions"] = target_instructions.strip()
 
         try:
-            # 3. Tambahkan pesan baru dari user ke dalam Thread
-            await self.client.beta.threads.messages.create(
-                thread_id=thread_id,
-                role="user",
-                content=message
-            )
-            logger.info(f"Pesan user ditambahkan ke thread {thread_id}")
-
-            # 4. Buat dan jalankan Run (menggunakan create_and_poll dari SDK resmi v2)
-            run = await self.client.beta.threads.runs.create_and_poll(
-                thread_id=thread_id,
-                assistant_id=target_assistant_id,
-                poll_interval_ms=1000
-            )
-            logger.info(f"Run {run.id} selesai dengan status: {run.status}")
-
-            if run.status != "completed":
-                error_detail = f"Run tidak selesai (Status: {run.status})."
-                if hasattr(run, "last_error") and run.last_error:
-                    error_detail += f" Detail: {run.last_error}"
-                logger.error(error_detail)
-                raise RuntimeError(error_detail)
-
-            # 5. Ambil riwayat pesan dari Thread
-            messages = await self.client.beta.threads.messages.list(
-                thread_id=thread_id,
-                order="desc",
-                limit=10
-            )
-
-            response_text = ""
-            for msg in messages.data:
-                # PENTING: Hanya ambil pesan yang cocok dengan run_id saat ini agar tidak mengambil balasan lama
-                if msg.role == "assistant" and msg.run_id == run.id:
-                    for content_block in msg.content:
-                        if content_block.type == "text":
-                            response_text += content_block.text.value + "\n"
-                    break
+            logger.info(f"Memanggil OpenAI Responses API dengan model {settings.openai_model} (previous_response_id: {params.get('previous_response_id')})")
             
-            # Jika run berhasil tapi tidak ada teks yang dikembalikan oleh run tersebut
-            if not response_text.strip():
-                raise RuntimeError("Assistant selesai memproses, namun tidak menghasilkan jawaban teks untuk run saat ini.")
+            # Panggilan asinkron tunggal tanpa polling run!
+            response = await self.client.responses.create(**params)
+            logger.info(f"Responses API berhasil. ID Respons baru: {response.id}")
 
-            return response_text.strip(), thread_id, run.id, run.status
+            # Ekstrak teks balasan dari properti output_text
+            output_text = getattr(response, "output_text", None) or ""
+            
+            # Fallback jika output_text kosong, periksa atribut output array
+            if not output_text.strip() and hasattr(response, "output") and response.output:
+                for item in response.output:
+                    if hasattr(item, "content") and item.content:
+                        for content_item in item.content:
+                            if hasattr(content_item, "text") and content_item.text:
+                                output_text += str(content_item.text) + "\n"
+                            elif hasattr(content_item, "value") and content_item.value:
+                                output_text += str(content_item.value) + "\n"
+
+            if not output_text.strip():
+                raise RuntimeError("Model AI selesai memproses, namun tidak menghasilkan jawaban teks yang valid.")
+
+            return output_text.strip(), response.id, "completed"
 
         except RateLimitError as e:
             logger.error(f"Rate limit exceeded: {str(e)}")
@@ -112,7 +106,7 @@ class OpenAIService:
             logger.error(f"Authentication error: {str(e)}")
             raise e
         except (NotFoundError, BadRequestError) as e:
-            logger.error(f"Request error OpenAI: {str(e)}")
+            logger.error(f"Request error OpenAI Responses API: {str(e)}")
             raise e
         except OpenAIError as e:
             logger.error(f"OpenAI API Error: {str(e)}")

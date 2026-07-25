@@ -8,7 +8,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
-from app.schemas import ChatRequest, ChatResponse, ThreadCreateResponse, HealthResponse
+from app.schemas import ChatRequest, ChatResponse, ConversationInitResponse, ThreadCreateResponse, HealthResponse
 from app.services import OpenAIService, get_openai_service
 
 # Konfigurasi logging dasar
@@ -24,8 +24,8 @@ limiter = Limiter(key_func=get_remote_address)
 # Inisialisasi FastAPI App
 app = FastAPI(
     title=settings.app_name,
-    description="Backend API untuk Chatbot AI berbasis FastAPI dan OpenAI Assistants API (Dilengkapi Proteksi Keamanan & Rate Limiter)",
-    version="1.0.1",
+    description="Backend API Chatbot AI Modern berbasis FastAPI dan OpenAI Responses API (Dilengkapi Keamanan & Rate Limiter)",
+    version="2.0.0-responses-api",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -51,7 +51,6 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
             )
 
 # Konfigurasi CORS Middleware yang Aman
-# Memastikan tidak terjadi konflik wildcard '*' dengan allow_credentials=True
 allowed_origins = settings.allowed_origins
 has_wildcard = "*" in allowed_origins
 
@@ -75,30 +74,39 @@ async def health_check():
         status="ok",
         app_name=settings.app_name,
         environment=settings.app_env,
-        version="1.0.1"
+        version="2.0.0-responses-api"
     )
 
+@app.post(
+    "/api/v1/conversations", 
+    response_model=ConversationInitResponse, 
+    status_code=status.HTTP_201_CREATED, 
+    tags=["Conversations"],
+    dependencies=[Depends(verify_api_key)]
+)
 @app.post(
     "/api/v1/threads", 
     response_model=ThreadCreateResponse, 
     status_code=status.HTTP_201_CREATED, 
-    tags=["Threads"],
-    dependencies=[Depends(verify_api_key)]
+    tags=["Conversations (Legacy Alias)"],
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False
 )
 @limiter.limit("10/minute")
-async def create_new_thread(
+async def init_conversation_endpoint(
     request: Request,
     service: OpenAIService = Depends(get_openai_service)
 ):
     """
-    Endpoint untuk membuat Thread percakapan OpenAI baru secara manual.
+    Endpoint untuk menginisialisasi sesi percakapan baru.
+    Mendukung endpoint modern '/api/v1/conversations' dan tetap menjaga backward compatibility dengan '/api/v1/threads'.
     Dilengkapi proteksi Rate Limit (maks 10/menit) dan pengecekan otentikasi X-API-Key.
     """
     try:
-        thread_id = await service.create_thread()
-        return ThreadCreateResponse(
-            thread_id=thread_id,
-            message="Thread percakapan berhasil dibuat"
+        conversation_id = await service.init_conversation()
+        return ConversationInitResponse(
+            conversation_id=conversation_id,
+            message="Sesi percakapan baru berhasil diinisialisasi"
         )
     except AuthenticationError:
         raise HTTPException(
@@ -106,7 +114,7 @@ async def create_new_thread(
             detail="Autentikasi ke OpenAI gagal. Periksa konfigurasi OPENAI_API_KEY di file .env."
         )
     except OpenAIError as e:
-        logger.error(f"Gagal membuat thread: {str(e)}")
+        logger.error(f"Gagal menginisialisasi percakapan: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Terjadi kesalahan saat berkomunikasi dengan server OpenAI: {str(e)}"
@@ -132,21 +140,21 @@ async def chat_endpoint(
     service: OpenAIService = Depends(get_openai_service)
 ):
     """
-    Endpoint utama untuk berinteraksi dengan Chatbot AI Assistant.
+    Endpoint utama untuk berinteraksi dengan Chatbot AI menggunakan OpenAI Responses API.
     - Dilengkapi proteksi Rate Limit (maks 20/menit) dan pengecekan otentikasi X-API-Key.
-    - Validasi regex ID dan batas maksimal teks 4000 karakter.
-    - Mengembalikan balasan AI, thread_id, dan run_id.
+    - Menggunakan 'previous_response_id' untuk meneruskan percakapan sebelumnya secara otomatis tanpa polling rumit.
+    - Mendukung kompatibilitas dengan frontend lama yang mengirimkan 'thread_id'.
     """
     try:
-        response_text, thread_id, run_id, run_status = await service.chat_with_assistant(
+        response_text, response_id, run_status = await service.chat_with_responses_api(
             message=payload.message,
-            thread_id=payload.thread_id,
-            assistant_id=payload.assistant_id
+            previous_response_id=payload.previous_response_id,
+            instructions=payload.instructions
         )
         return ChatResponse(
             response=response_text,
-            thread_id=thread_id,
-            run_id=run_id,
+            response_id=response_id,
+            conversation_id=response_id,
             status=run_status
         )
     except ValueError as e:
@@ -155,18 +163,16 @@ async def chat_endpoint(
             detail=str(e)
         )
     except NotFoundError as e:
-        # Menangani thread_id atau assistant_id yang tidak ditemukan di server OpenAI (HTTP 404)
         logger.warning(f"OpenAI resource not found: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Resource (thread/assistant) tidak ditemukan di OpenAI: {str(e)}"
+            detail=f"ID respons / sesi sebelumnya tidak ditemukan di server OpenAI: {str(e)}"
         )
     except BadRequestError as e:
-        # Menangani request yang ditolak oleh validasi OpenAI (HTTP 400)
         logger.warning(f"OpenAI bad request: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Permintaan tidak valid menurut spesifikasi OpenAI: {str(e)}"
+            detail=f"Permintaan tidak valid menurut spesifikasi OpenAI Responses API: {str(e)}"
         )
     except AuthenticationError:
         raise HTTPException(
