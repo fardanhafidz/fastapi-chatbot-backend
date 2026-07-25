@@ -1,7 +1,6 @@
-import asyncio
 import logging
 from typing import Tuple, Optional
-from openai import AsyncOpenAI, OpenAIError, RateLimitError, AuthenticationError
+from openai import AsyncOpenAI, OpenAIError, RateLimitError, AuthenticationError, NotFoundError, BadRequestError
 from app.config import settings
 
 # Konfigurasi logging
@@ -11,8 +10,9 @@ class OpenAIService:
     """
     Layanan untuk berkomunikasi dengan OpenAI Assistants API (v2) secara asinkron.
     """
-    def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+    def __init__(self, client: Optional[AsyncOpenAI] = None):
+        # Inisialisasi client secara dinamis untuk menghindari issue 'Event loop is closed' saat runtime/multiprocess
+        self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self.default_assistant_id = settings.openai_assistant_id
 
     async def create_thread(self) -> str:
@@ -29,7 +29,7 @@ class OpenAIService:
         except AuthenticationError as e:
             logger.error("Autentikasi OpenAI gagal. Periksa OPENAI_API_KEY.")
             raise e
-        except OpenAIError as e:
+        except Exception as e:
             logger.error(f"Error saat membuat thread OpenAI: {str(e)}")
             raise e
 
@@ -83,29 +83,25 @@ class OpenAIService:
                 logger.error(error_detail)
                 raise RuntimeError(error_detail)
 
-            # 5. Ambil riwayat pesan dari Thread (mengambil pesan terbaru dari assistant)
+            # 5. Ambil riwayat pesan dari Thread
             messages = await self.client.beta.threads.messages.list(
                 thread_id=thread_id,
                 order="desc",
-                limit=5
+                limit=10
             )
 
             response_text = ""
             for msg in messages.data:
+                # PENTING: Hanya ambil pesan yang cocok dengan run_id saat ini agar tidak mengambil balasan lama
                 if msg.role == "assistant" and msg.run_id == run.id:
                     for content_block in msg.content:
                         if content_block.type == "text":
                             response_text += content_block.text.value + "\n"
                     break
             
-            # Fallback jika tidak ketemu berdasarkan run_id, ambil pesan assistant pertama (terbaru)
+            # Jika run berhasil tapi tidak ada teks yang dikembalikan oleh run tersebut
             if not response_text.strip():
-                for msg in messages.data:
-                    if msg.role == "assistant":
-                        for content_block in msg.content:
-                            if content_block.type == "text":
-                                response_text += content_block.text.value + "\n"
-                        break
+                raise RuntimeError("Assistant selesai memproses, namun tidak menghasilkan jawaban teks untuk run saat ini.")
 
             return response_text.strip(), thread_id, run.id, run.status
 
@@ -115,9 +111,13 @@ class OpenAIService:
         except AuthenticationError as e:
             logger.error(f"Authentication error: {str(e)}")
             raise e
+        except (NotFoundError, BadRequestError) as e:
+            logger.error(f"Request error OpenAI: {str(e)}")
+            raise e
         except OpenAIError as e:
             logger.error(f"OpenAI API Error: {str(e)}")
             raise e
 
-# Inisialisasi instance service (singleton)
-openai_service = OpenAIService()
+# Dependency provider untuk diinjeksi ke endpoint FastAPI (Dependency Injection)
+def get_openai_service() -> OpenAIService:
+    return OpenAIService()

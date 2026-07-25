@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     debug: bool = Field(True, alias="DEBUG")
     port: int = Field(8000, alias="PORT")
     
-    # CORS
+    # Keamanan & CORS
     allowed_origins_raw: str = Field("http://localhost:3000,http://localhost:8000,http://127.0.0.1:8000", alias="ALLOWED_ORIGINS")
+    internal_api_key: Optional[str] = Field(None, alias="INTERNAL_API_KEY")
     
     # OpenAI Credentials
     openai_api_key: str = Field("sk-your-openai-api-key-here", alias="OPENAI_API_KEY")
