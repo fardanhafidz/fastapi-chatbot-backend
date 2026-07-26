@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asisten Virtual | SMK Telkom Ngawi Selatan</title>
+    <title>AI Virtual Assistant | Frontend Test</title>
     <!-- Google Fonts: Inter & Outfit -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -402,8 +402,8 @@
                         <div class="avatar-status"></div>
                     </div>
                     <div class="header-info">
-                        <h4>SMK Telkom Ngawi Selatan</h4>
-                        <span>● Asisten Virtual Online</span>
+                        <h4>AI Customer Service</h4>
+                        <span>● Virtual Assistant Online</span>
                     </div>
                 </div>
                 <div class="header-actions">
@@ -417,7 +417,7 @@
                 <div class="message bot">
                     <div class="msg-avatar">👩‍💼</div>
                     <div class="msg-bubble">
-                        Halo! Saya adalah asisten virtual SMK Telkom Ngawi Selatan. Saya di sini untuk membantu Anda mendapatkan informasi tentang SMK Telkom Ngawi Selatan. Silakan tanyakan apa saja yang ingin Anda ketahui!
+                        Halo, selamat datang! Saya adalah Asisten AI yang siap membantu menjawab pertanyaan dan memberikan informasi yang Anda butuhkan. Silakan tanyakan apa saja yang ingin Anda ketahui!
                     </div>
                 </div>
             </div>
@@ -431,7 +431,7 @@
         </div>
 
         <!-- Floating Toggle Button -->
-        <button class="chat-float-btn" onclick="toggleChat()" title="Buka Asisten Virtual">
+        <button class="chat-float-btn" onclick="toggleChat()" title="Buka Virtual Assistant">
             💬
             <span class="btn-badge">AI</span>
         </button>
@@ -440,7 +440,7 @@
 
     <!-- Javascript Logic -->
     <script>
-        // Konfigurasi API tetap (tanpa menu setting / developer tools)
+        // Konfigurasi API tetap
         const BASE_URL = "http://127.0.0.1:8000";
         const API_KEY = "fastapichatbotbackend@2026";
 
@@ -544,11 +544,11 @@
                     } catch (e) {}
 
                     if (response.status === 401) {
-                        appendMessage("error", `🔒 <b>Akses Ditolak (401 Unauthorized):</b><br>API Key tidak cocok. Pastikan konfigurasi <code>INTERNAL_API_KEY</code> di file .env Anda sama dengan kunci di frontend.`);
+                        appendMessage("error", `<b>Akses Ditolak (401 Unauthorized):</b><br>API Key tidak cocok. Pastikan konfigurasi <code>INTERNAL_API_KEY</code> di file .env Anda sama dengan kunci di frontend.`);
                     } else if (response.status === 429) {
-                        appendMessage("error", `⏳ <b>Rate Limit Tercapai (429):</b><br>Anda mengirim pesan terlalu cepat. Silakan tunggu beberapa detik sebelum mencoba lagi.`);
+                        appendMessage("error", `<b>Rate Limit Tercapai (429):</b><br>Anda mengirim pesan terlalu cepat. Silakan tunggu beberapa detik sebelum mencoba lagi.`);
                     } else {
-                        appendMessage("error", `⚠️ <b>Error (${response.status}):</b><br>${errDetail}`);
+                        appendMessage("error", `<b>Error (${response.status}):</b><br>${errDetail}`);
                     }
                 } else {
                     const data = await response.json();
@@ -563,7 +563,7 @@
             } catch (error) {
                 console.error("Fetch error:", error);
                 removeElement(typingId);
-                appendMessage("error", `🌐 <b>Gagal Menghubungi Server:</b><br>Pastikan server Uvicorn sedang berjalan di <code>${BASE_URL}</code> dan tidak ada pemblokiran jaringan.`);
+                appendMessage("error", `<b>Gagal Menghubungi Server:</b><br>Pastikan server Uvicorn sedang berjalan di <code>${BASE_URL}</code> dan tidak ada pemblokiran jaringan.`);
             } finally {
                 isWaitingResponse = false;
                 sendBtn.disabled = false;
