@@ -55,6 +55,21 @@ async def health_check():
         version="2.0.0-responses-api"
     )
 
+import os
+from fastapi.responses import FileResponse
+
+@app.get("/demo", include_in_schema=False)
+@app.get("/chat", include_in_schema=False)
+async def serve_demo_page():
+    """
+    Endpoint utilitas untuk melayani halaman testing frontend chatbot satu halaman (index.html).
+    Dapat diakses melalui http://127.0.0.1:8000/demo atau http://127.0.0.1:8000/chat
+    """
+    demo_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "index.html")
+    if os.path.exists(demo_file):
+        return FileResponse(demo_file)
+    return {"message": "Frontend demo file not found."}
+
 @app.post("/api/v1/conversations", response_model=ConversationCreateResponse, status_code=status.HTTP_201_CREATED, tags=["Conversations"], dependencies=[Depends(verify_api_key)])
 @limiter.limit("15/minute")
 async def create_new_conversation(request: Request, service: OpenAIService = Depends(get_openai_service)):
