@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# Internal documents & audits
+revisions.md
+*revision*.md
+
 # Virtual Environment
 venv/
 .venv/
