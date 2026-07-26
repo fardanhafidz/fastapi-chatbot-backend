@@ -48,7 +48,7 @@ fastapi-chatbot-backend/
 
 1. **Klona Repositori dan Masuk ke Direktori Proyek**
    ```bash
-   git clone <url-repository-anda>
+   git clone https://github.com/fardanhafidz/fastapi-chatbot-backend
    cd fastapi-chatbot-backend
    ```
 
